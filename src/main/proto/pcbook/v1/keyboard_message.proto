@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package pcbook.v1;
+
+option go_package = "github.com/kittichanr/pcbook/proto";
+
+option java_package = "com.kittichanr.pcbook.generated";
+option java_multiple_files = true;
+
+message Keyboard {
+  enum Layout {
+    UNKNOWN = 0;
+    QWERTY = 1;
+    QWERTZ = 2;
+    AZERTY = 3;
+  }
+  Layout layout = 1;
+  bool backlist = 2;
+}

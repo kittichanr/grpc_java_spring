@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package pcbook.v1;
+
+import "pcbook/v1/memory_message.proto";
+
+option go_package = "github.com/kittichanr/pcbook/proto";
+
+option java_package = "com.kittichanr.pcbook.generated";
+option java_multiple_files = true;
+
+message Storage {
+  enum Driver {
+    UNKNOWN = 0;
+    HDD = 1;
+    SDD = 2;
+  }
+
+  Driver driver = 1;
+  Memory momory = 2;
+}
