@@ -15,5 +15,5 @@ message Keyboard {
     AZERTY = 3;
   }
   Layout layout = 1;
-  bool backlist = 2;
+  bool backlit = 2;
 }
