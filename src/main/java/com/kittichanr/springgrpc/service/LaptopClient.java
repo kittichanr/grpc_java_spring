@@ -1,15 +1,13 @@
 package com.kittichanr.springgrpc.service;
 
-import com.kittichanr.pcbook.generated.CreateLaptopRequest;
-import com.kittichanr.pcbook.generated.CreateLaptopResponse;
-import com.kittichanr.pcbook.generated.Laptop;
-import com.kittichanr.pcbook.generated.LaptopServiceGrpc;
+import com.kittichanr.pcbook.generated.*;
 import com.kittichanr.springgrpc.sample.Generator;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 
+import java.util.Iterator;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -52,17 +50,53 @@ public class LaptopClient {
         logger.info("laptop created with ID: " + response.getId());
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        LaptopClient client = new LaptopClient("0.0.0.0", 8080);
+    private void searchLaptop(Filter filter) {
+        logger.info("search started");
 
-        Generator generator = new Generator(new Random());
-        Laptop laptop = generator.NewLaptop().toBuilder().setId("").build();
+        SearchLaptopRequest request = SearchLaptopRequest.newBuilder().setFilter(filter).build();
 
         try {
-            client.createLaptop(laptop);
+            Iterator<SearchLaptopResponse> responseIterator = blockingStub
+                    .withDeadlineAfter(5, TimeUnit.SECONDS)
+                    .searchLaptop(request);
+
+            while (responseIterator.hasNext()) {
+                SearchLaptopResponse response = responseIterator.next();
+                Laptop laptop = response.getLaptop();
+                logger.info("- found " + laptop.getId());
+            }
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "request failed: " + e.getMessage());
+            return;
+        }
+
+        logger.info("search completed");
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        LaptopClient client = new LaptopClient("0.0.0.0", 8080);
+        Generator generator = new Generator(new Random());
+
+        try {
+            for (int i = 0; i < 10; i++) {
+                Laptop laptop = generator.NewLaptop();
+                client.createLaptop(laptop);
+            }
+            Memory memory = Memory.newBuilder()
+                    .setValue(8)
+                    .setUnit(Memory.Unit.GIGABYTE)
+                    .build();
+
+            Filter filter = Filter.newBuilder()
+                    .setMaxPriceUsd(3200)
+                    .setMinCpuCores(4)
+                    .setMinCpuGhz(2.5)
+                    .setMinRam(memory)
+                    .build();
+            client.searchLaptop(filter);
+
         } finally {
             client.shutdown();
         }
     }
-
 }
