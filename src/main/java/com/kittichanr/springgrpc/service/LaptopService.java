@@ -1,10 +1,13 @@
 package com.kittichanr.springgrpc.service;
 
+import com.google.protobuf.ByteString;
 import com.kittichanr.pcbook.generated.*;
 import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.UUID;
 import java.util.logging.Logger;
 
@@ -13,12 +16,13 @@ import java.util.logging.Logger;
 public class LaptopService extends LaptopServiceGrpc.LaptopServiceImplBase {
     private static final Logger logger = Logger.getLogger(LaptopService.class.getName());
 
-    private LaptopStore store;
+    private LaptopStore laptopStore;
+    private ImageStore imageStore;
 
-    public LaptopService(LaptopStore store) {
-        this.store = store;
+    public LaptopService(LaptopStore laptopStore, ImageStore imageStore) {
+        this.laptopStore = laptopStore;
+        this.imageStore = imageStore;
     }
-
 
     @Override
     public void createLaptop(CreateLaptopRequest request, StreamObserver<CreateLaptopResponse> responseObserver) {
@@ -60,7 +64,7 @@ public class LaptopService extends LaptopServiceGrpc.LaptopServiceImplBase {
 
         // save other laptop to store
         try {
-            store.Save(other);
+            laptopStore.Save(other);
         } catch (AlreadyExistsException e) {
             responseObserver.onError(Status.ALREADY_EXISTS
                     .withDescription(e.getMessage())
@@ -87,7 +91,7 @@ public class LaptopService extends LaptopServiceGrpc.LaptopServiceImplBase {
         Filter filter = request.getFilter();
         logger.info("get a search-laptop request with filter:\n" + filter);
 
-        store.Search(Context.current(), filter, new LaptopStream() {
+        laptopStore.Search(Context.current(), filter, new LaptopStream() {
             @Override
             public void Send(Laptop laptop) {
                 logger.info("found laptop with ID: " + laptop.getId());
@@ -97,5 +101,99 @@ public class LaptopService extends LaptopServiceGrpc.LaptopServiceImplBase {
         });
         responseObserver.onCompleted();
         logger.info("search laptop completed");
+    }
+
+    @Override
+    public StreamObserver<UploadImageRequest> uploadImage(StreamObserver<UploadImageResponse> responseObserver) {
+        return new StreamObserver<UploadImageRequest>() {
+            private String laptopID;
+            private String imageType;
+            private ByteArrayOutputStream imageData;
+            private static final int maxImageSize = 1 << 20; // 1 megabytes
+
+            @Override
+            public void onNext(UploadImageRequest request) {
+                if (request.getDataCase() == UploadImageRequest.DataCase.INFO) {
+                    ImageInfo info = request.getInfo();
+                    logger.info("receive image info:\n" + info);
+
+                    laptopID = info.getLaptopId();
+                    imageType = info.getImageType();
+                    imageData = new ByteArrayOutputStream();
+
+                    // chunk laptop exists
+                    Laptop found = laptopStore.Find(laptopID);
+                    if (found == null) {
+                        responseObserver.onError(
+                                Status.NOT_FOUND
+                                        .withDescription("laptop ID doesn't exist")
+                                        .asRuntimeException()
+                        );
+                    }
+                    return;
+                }
+                ByteString chunkData = request.getChunkData();
+                logger.info("receive image chunk with size: " + chunkData.size());
+
+                if (imageData == null) {
+                    logger.info("image info wasn't sent before");
+                    responseObserver.onError(
+                            Status.INVALID_ARGUMENT
+                                    .withDescription("image info wasn't sent before")
+                                    .asRuntimeException()
+                    );
+                    return;
+                }
+
+                int size = imageData.size() + chunkData.size();
+                if (size > maxImageSize) {
+                    logger.info("image is too large: " + size);
+                    responseObserver.onError(
+                            Status.INVALID_ARGUMENT
+                                    .withDescription("image is too large: " + size)
+                                    .asRuntimeException()
+                    );
+                }
+
+                try {
+                    chunkData.writeTo(imageData);
+                } catch (IOException e) {
+                    responseObserver.onError(
+                            Status.INTERNAL
+                                    .withDescription("cannot write chunk data: " + e.getMessage())
+                                    .asRuntimeException()
+                    );
+                    return;
+                }
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                logger.warning(throwable.getMessage());
+            }
+
+            @Override
+            public void onCompleted() {
+                String imageID = "";
+                int imageSize = imageData.size();
+
+                try {
+                    imageID = imageStore.Save(laptopID, imageType, imageData);
+                } catch (IOException e) {
+                    responseObserver.onError(
+                            Status.INTERNAL
+                                    .withDescription("cannot save image to the store " + e.getMessage())
+                                    .asRuntimeException()
+                    );
+                }
+
+                UploadImageResponse response = UploadImageResponse.newBuilder()
+                        .setId(imageID)
+                        .setSize(imageSize)
+                        .build();
+                responseObserver.onNext(response);
+                responseObserver.onCompleted();
+            }
+        };
     }
 }
